@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Name → Letter Recognition Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            touch-action: manipulation; /* Prevents double-tap zoom on mobile */
+        }
+        .screen {
+            display: none;
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        .screen.active {
+            display: flex;
+        }
+        .letter-tile {
+            font-size: 5rem;
+            font-weight: 900;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
+            user-select: none;
+        }
+        .letter-tile:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .letter-tile.correct {
+            animation: correct-pop 0.5s ease-out;
+            background-color: #4ade80; /* green-400 */
+            color: white;
+            border-color: #22c55e; /* green-500 */
+        }
+        .letter-tile.incorrect {
+            animation: incorrect-shake 0.5s ease-in-out;
+            background-color: #f87171; /* red-400 */
+            color: white;
+            border-color: #ef4444; /* red-500 */
+        }
+        #confetti-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 100;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+        .modal-box {
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 90%;
+            width: 400px;
+        }
+        .race-track {
+            position: relative;
+            width: 100%;
+            height: 50px;
+            background-color: #a5f3fc; /* cyan-200 */
+            border-radius: 25px;
+            border: 4px solid #0891b2; /* cyan-600 */
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .racer {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%) scale(1.5);
+            font-size: 24px;
+            transition: left 0.5s ease-in-out;
+        }
+        .goal {
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            transform: translateY(-50%) scale(1.5);
+            font-size: 24px;
+        }
+        #drawing-canvas {
+            touch-action: none; /* Allows capturing pointer events on canvas */
+            cursor: crosshair;
+        }
+        .sticker {
+            font-size: 3rem;
+            user-select: none;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.98); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes correct-pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+        @keyframes incorrect-shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-10px); }
+            40%, 80% { transform: translateX(10px); }
+        }
+    </style>
+</head>
+<body class="bg-sky-100 text-slate-800 flex items-center justify-center min-h-screen p-4">
+
+    <canvas id="confetti-canvas"></canvas>
+
+    <div id="app-container" class="w-full max-w-2xl mx-auto">
+
+        <!-- Home/Start Screen -->
+        <div id="home-screen" class="screen active flex-col items-center justify-center space-y-6">
+            <h1 class="text-5xl md:text-6xl font-black text-sky-600">Letter Fun</h1>
+            <p class="text-slate-500 text-center">Play games or practice drawing!</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
+                <button data-screen="game-screen" class="screen-btn bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-2xl">Letter Race</button>
+                <button data-screen="drawing-screen" class="screen-btn bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-2xl">Drawing Practice</button>
+                <button data-screen="rewards-screen" class="screen-btn bg-amber-500 hover:bg-amber-600 text-white font-bold py-3 px-5 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-xl">Sticker Collection</button>
+                <button data-screen="settings-screen" class="screen-btn bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-5 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-xl">Settings</button>
+            </div>
+        </div>
+
+        <!-- Round (Game) Screen -->
+        <div id="game-screen" class="screen flex-col w-full">
+            <div class="flex items-center justify-between mb-4 p-2 bg-white/50 rounded-lg">
+                <button id="home-btn-game" class="home-btn bg-red-500 hover:bg-red-600 text-white font-bold p-3 rounded-full shadow-md transition-transform transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                </button>
+                <div id="instruction-text" class="text-xl md:text-2xl font-bold text-sky-700 text-center">Find the letter</div>
+                <button id="replay-prompt-btn" class="bg-sky-500 hover:bg-sky-600 text-white font-bold p-3 rounded-full shadow-md transition-transform transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.636 5.636a9 9 0 0112.728 0M8.464 15.536a5 5 0 010-7.072" /></svg>
+                </button>
+            </div>
+            <div class="race-track my-4">
+                <div id="unicorn" class="racer">🦄</div>
+                <div id="bear" class="racer">🐻</div>
+                <div class="goal">🏰</div>
+            </div>
+            <div id="letter-grid" class="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 flex-grow mt-4"></div>
+        </div>
+
+        <!-- Drawing Screen -->
+        <div id="drawing-screen" class="screen flex-col w-full">
+             <div class="flex items-center justify-between mb-4 p-2 bg-white/50 rounded-lg">
+                <button id="home-btn-draw" class="home-btn bg-red-500 hover:bg-red-600 text-white font-bold p-3 rounded-full shadow-md transition-transform transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                </button>
+                <div id="drawing-instruction" class="text-xl md:text-2xl font-bold text-purple-700 text-center">Let's draw!</div>
+                 <button id="replay-draw-prompt-btn" class="bg-purple-500 hover:bg-purple-600 text-white font-bold p-3 rounded-full shadow-md transition-transform transform hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.636 5.636a9 9 0 0112.728 0M8.464 15.536a5 5 0 010-7.072" /></svg>
+                </button>
+            </div>
+            <canvas id="drawing-canvas" class="w-full bg-white rounded-2xl shadow-lg border-4 border-slate-200 aspect-square"></canvas>
+            <div class="grid grid-cols-2 gap-4 mt-4">
+                <button id="clear-canvas-btn" class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg text-xl">Clear</button>
+                <button id="new-letter-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg text-xl">New Letter</button>
+            </div>
+        </div>
+
+        <!-- Rewards Screen -->
+        <div id="rewards-screen" class="screen flex-col w-full">
+            <h2 class="text-4xl font-black text-amber-600 mb-4">Your Sticker Collection</h2>
+            <p class="text-slate-500 mb-6">You've earned these by helping the unicorn!</p>
+            <div id="sticker-collection" class="w-full min-h-[200px] bg-white p-4 rounded-lg shadow-inner grid grid-cols-4 sm:grid-cols-6 gap-4">
+                <!-- Stickers will be inserted here by JS -->
+            </div>
+            <button data-screen="home-screen" class="screen-btn mt-8 bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-xl">Back Home</button>
+        </div>
+
+        <!-- Settings Screen -->
+        <div id="settings-screen" class="screen flex-col w-full space-y-6">
+             <h2 class="text-4xl font-black text-sky-600">Settings</h2>
+            <div>
+                <h3 class="text-2xl font-bold mb-2">Active Letters</h3>
+                <div id="letter-selection-grid" class="grid grid-cols-6 sm:grid-cols-9 gap-2 bg-white p-3 rounded-lg shadow-inner"></div>
+                 <div class="flex justify-center mt-2 space-x-2">
+                    <button id="select-all-letters" class="text-sm bg-slate-200 px-3 py-1 rounded-md">All</button>
+                    <button id="select-none-letters" class="text-sm bg-slate-200 px-3 py-1 rounded-md">None</button>
+                </div>
+            </div>
+            <div>
+                <h3 class="text-2xl font-bold mb-2">Game Mode (for Letter Race)</h3>
+                <div id="case-mode-selection" class="flex flex-col sm:flex-row gap-2">
+                    <label class="flex items-center bg-white p-3 rounded-lg shadow-sm flex-1"><input type="radio" name="caseMode" value="any" class="mr-2 h-5 w-5"> Any Case</label>
+                    <label class="flex items-center bg-white p-3 rounded-lg shadow-sm flex-1"><input type="radio" name="caseMode" value="upper" class="mr-2 h-5 w-5"> Uppercase</label>
+                    <label class="flex items-center bg-white p-3 rounded-lg shadow-sm flex-1"><input type="radio" name="caseMode" value="lower" class="mr-2 h-5 w-5"> Lowercase</label>
+                </div>
+            </div>
+            <div>
+                <h3 class="text-2xl font-bold mb-2">Race Length: <span id="round-length-value">10</span> steps</h3>
+                <input id="round-length-slider" type="range" min="5" max="15" value="10" class="w-full">
+            </div>
+            <div class="flex flex-col sm:flex-row gap-4 pt-4">
+                <button data-screen="home-screen" class="screen-btn bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-xl flex-1">Save & Go Home</button>
+            </div>
+        </div>
+        
+        <!-- End of Round Screen -->
+        <div id="end-round-screen" class="screen flex-col items-center justify-center space-y-6">
+            <div id="end-round-icon" class="text-8xl animate-bounce"></div>
+            <h2 id="end-round-title" class="text-5xl font-black"></h2>
+            <p id="end-round-message" class="text-slate-500"></p>
+            <div class="flex gap-4">
+                <button id="play-again-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-2xl">Play Again</button>
+                <button data-screen="home-screen" class="screen-btn bg-sky-500 hover:bg-sky-600 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition-transform transform hover:scale-105 text-2xl">Home</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Elements ---
+            const screens = document.querySelectorAll('.screen');
+            const screenBtns = document.querySelectorAll('.screen-btn');
+            const homeBtns = document.querySelectorAll('.home-btn');
+            const letterGrid = document.getElementById('letter-grid');
+            const instructionText = document.getElementById('instruction-text');
+            const replayPromptBtn = document.getElementById('replay-prompt-btn');
+            const letterSelectionGrid = document.getElementById('letter-selection-grid');
+            const caseModeSelection = document.getElementById('case-mode-selection');
+            const roundLengthSlider = document.getElementById('round-length-slider');
+            const roundLengthValue = document.getElementById('round-length-value');
+            const playAgainBtn = document.getElementById('play-again-btn');
+            const selectAllLettersBtn = document.getElementById('select-all-letters');
+            const selectNoneLettersBtn = document.getElementById('select-none-letters');
+            const confettiCanvas = document.getElementById('confetti-canvas');
+            const unicorn = document.getElementById('unicorn');
+            const bear = document.getElementById('bear');
+            const endRoundIcon = document.getElementById('end-round-icon');
+            const endRoundTitle = document.getElementById('end-round-title');
+            const endRoundMessage = document.getElementById('end-round-message');
+            const stickerCollection = document.getElementById('sticker-collection');
+            // Drawing elements
+            const drawingCanvas = document.getElementById('drawing-canvas');
+            const drawingInstruction = document.getElementById('drawing-instruction');
+            const clearCanvasBtn = document.getElementById('clear-canvas-btn');
+            const newLetterBtn = document.getElementById('new-letter-btn');
+            const replayDrawPromptBtn = document.getElementById('replay-draw-prompt-btn');
+
+            // --- Constants ---
+            const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+            const STICKERS = ['🌟', '💖', '🚀', '🦄', '🎈', '🎉', '🏆', '🤩', '👍', '✅', '🍎', '💡', '🦋', '🌈', '👑'];
+            const CONFETTI_COLORS = ['#fde047', '#f97316', '#ec4899', '#8b5cf6', '#3b82f6', '#22c55e'];
+
+            // --- Game State ---
+            let state = {
+                currentScreen: 'home-screen',
+                settings: {
+                    activeLetters: [...ALPHABET],
+                    caseMode: 'any',
+                    raceLength: 10,
+                    choiceCount: 3,
+                },
+                race: {
+                    question: null,
+                    unicornPos: 0,
+                    bearPos: -3,
+                },
+                drawing: {
+                    letter: 'A',
+                },
+                rewards: [],
+                isAnswering: false,
+            };
+            
+            let voices = [];
+            let drawingCtx = drawingCanvas.getContext('2d');
+            let isDrawing = false;
+
+            // --- Confetti Logic ---
+            const ctx = confettiCanvas.getContext('2d');
+            let confettiParticles = [];
+
+            function triggerConfetti() {
+                confettiCanvas.width = window.innerWidth;
+                confettiCanvas.height = window.innerHeight;
+                confettiParticles = [];
+                for (let i = 0; i < 150; i++) {
+                    confettiParticles.push({
+                        x: Math.random() * confettiCanvas.width, y: -20,
+                        color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+                        radius: Math.random() * 5 + 2, vx: Math.random() * 6 - 3,
+                        vy: Math.random() * 5 + 2, alpha: 1,
+                    });
+                }
+                animateConfetti();
+            }
+
+            function animateConfetti() {
+                ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+                confettiParticles.forEach((p, index) => {
+                    p.vy += 0.1; p.x += p.vx; p.y += p.vy; p.alpha -= 0.01;
+                    if (p.alpha <= 0) confettiParticles.splice(index, 1);
+                    else {
+                        ctx.globalAlpha = p.alpha; ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = p.color; ctx.fill();
+                    }
+                });
+                if (confettiParticles.length > 0) requestAnimationFrame(animateConfetti);
+            }
+
+            // --- Speech Synthesis ---
+            const synth = window.speechSynthesis;
+            let speechAvailable = !!synth;
+
+            function loadVoices() {
+                voices = synth.getVoices();
+                if (voices.length === 0 && speechAvailable) {
+                    synth.onvoiceschanged = () => { voices = synth.getVoices(); };
+                }
+            }
+
+            function speak(text, callback) {
+                if (!speechAvailable || (voices.length === 0 && synth.getVoices().length === 0)) {
+                    console.warn("Speech synthesis not available or no voices loaded.");
+                    if(callback) setTimeout(callback, 500);
+                    return;
+                }
+                if (voices.length === 0) voices = synth.getVoices();
+
+                synth.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.voice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+                utterance.rate = 0.9; utterance.pitch = 1.2;
+                utterance.onend = () => { if (callback) callback(); };
+                setTimeout(() => synth.speak(utterance), 50);
+            }
+
+            // --- Screen Management ---
+            function showScreen(screenId) {
+                state.currentScreen = screenId;
+                screens.forEach(screen => screen.classList.toggle('active', screen.id === screenId));
+                if (screenId === 'game-screen') startRaceGame();
+                if (screenId === 'settings-screen') renderSettings();
+                if (screenId === 'drawing-screen') startDrawingMode();
+                if (screenId === 'rewards-screen') renderRewards();
+            }
+
+            // --- Settings Management ---
+            function saveSettings() { localStorage.setItem('letterGameSettings', JSON.stringify(state.settings)); }
+            function loadSettings() {
+                const saved = localStorage.getItem('letterGameSettings');
+                if (saved) state.settings = JSON.parse(saved);
+            }
+            
+            function renderSettings() {
+                letterSelectionGrid.innerHTML = ALPHABET.map(letter => `
+                    <label class="flex items-center justify-center p-1 rounded-md cursor-pointer transition-colors ${state.settings.activeLetters.includes(letter) ? 'bg-sky-500 text-white' : 'bg-slate-200'}">
+                        <input type="checkbox" data-letter="${letter}" class="hidden" ${state.settings.activeLetters.includes(letter) ? 'checked' : ''}>
+                        <span class="font-bold text-lg">${letter}</span>
+                    </label>`).join('');
+                document.querySelector(`input[name="caseMode"][value="${state.settings.caseMode}"]`).checked = true;
+                roundLengthSlider.value = state.settings.raceLength;
+                roundLengthValue.textContent = state.settings.raceLength;
+            }
+
+            function handleSettingsChange() {
+                const activeLetters = Array.from(letterSelectionGrid.querySelectorAll('input:checked')).map(input => input.dataset.letter);
+                state.settings.activeLetters = activeLetters.length > 0 ? activeLetters : [...ALPHABET];
+                state.settings.caseMode = document.querySelector('input[name="caseMode"]:checked').value;
+                state.settings.raceLength = parseInt(roundLengthSlider.value, 10);
+                roundLengthValue.textContent = state.settings.raceLength;
+                saveSettings();
+            }
+
+            // --- Rewards Management ---
+            function saveRewards() { localStorage.setItem('letterGameRewards', JSON.stringify(state.rewards)); }
+            function loadRewards() {
+                const saved = localStorage.getItem('letterGameRewards');
+                if (saved) state.rewards = JSON.parse(saved);
+            }
+            function addReward() {
+                const newSticker = STICKERS[state.rewards.length % STICKERS.length];
+                state.rewards.push(newSticker);
+                saveRewards();
+            }
+            function renderRewards() {
+                if (state.rewards.length === 0) {
+                    stickerCollection.innerHTML = `<p class="col-span-full text-center text-slate-500">Win a letter race to earn your first sticker!</p>`;
+                } else {
+                    stickerCollection.innerHTML = state.rewards.map(sticker => `<div class="sticker flex items-center justify-center">${sticker}</div>`).join('');
+                }
+            }
+
+            // --- Letter Race Game Logic ---
+            function startRaceGame() {
+                state.race.unicornPos = 0;
+                state.race.bearPos = -3;
+                state.isAnswering = false;
+                updateRacerPositions();
+                generateRaceQuestion();
+            }
+            
+            function updateRacerPositions() {
+                const trackWidth = unicorn.parentElement.offsetWidth;
+                const unicornOffset = (state.race.unicornPos / state.settings.raceLength) * (trackWidth - 60);
+                const bearOffset = (state.race.bearPos / state.settings.raceLength) * (trackWidth - 60);
+                unicorn.style.left = `${Math.max(0, unicornOffset)}px`;
+                bear.style.left = `${Math.max(0, bearOffset)}px`;
+            }
+
+            function generateRaceQuestion() {
+                if (state.settings.activeLetters.length === 0) {
+                    instructionText.textContent = "Please select letters in Settings!";
+                    letterGrid.innerHTML = ""; return;
+                }
+                
+                const targetLetter = state.settings.activeLetters[Math.floor(Math.random() * state.settings.activeLetters.length)];
+                let targetCase = (state.settings.caseMode === 'upper' || (state.settings.caseMode === 'any' && Math.random() > 0.5)) ? 'upper' : 'lower';
+                let promptPrefix = state.settings.caseMode === 'upper' ? 'Find capital' : (state.settings.caseMode === 'lower' ? 'Find lowercase' : 'Find');
+                
+                const choices = [{ letter: targetLetter, isCorrect: true, displayCase: targetCase }];
+                const distractorPool = ALPHABET.filter(l => l !== targetLetter);
+                while (choices.length < state.settings.choiceCount && distractorPool.length > 0) {
+                    const distractorIndex = Math.floor(Math.random() * distractorPool.length);
+                    choices.push({ letter: distractorPool.splice(distractorIndex, 1)[0], isCorrect: false, displayCase: Math.random() > 0.5 ? 'upper' : 'lower' });
+                }
+                state.race.question = { targetLetter, targetCase: state.settings.caseMode === 'any' ? 'any' : targetCase, prompt: `${promptPrefix} ${targetLetter}`, choices: shuffleArray(choices) };
+                renderRaceQuestion();
+            }
+
+            function renderRaceQuestion() {
+                state.isAnswering = false;
+                const question = state.race.question;
+                instructionText.textContent = question.prompt;
+                letterGrid.innerHTML = question.choices.map(choice => `
+                    <button class="letter-tile w-full h-32 md:h-40 bg-white rounded-2xl shadow-lg border-4 border-slate-200 flex items-center justify-center" data-letter="${choice.letter}" data-case="${choice.displayCase}">
+                        ${choice.displayCase === 'upper' ? choice.letter.toUpperCase() : choice.letter.toLowerCase()}
+                    </button>`).join('');
+                speak(question.prompt);
+            }
+            
+            function handleTileClick(e) {
+                const button = e.target.closest('.letter-tile');
+                if (!button || state.isAnswering) return;
+                state.isAnswering = true;
+                const question = state.race.question;
+                let wasAnswerCorrect = (question.targetCase === 'any') ? (button.dataset.letter === question.targetLetter) : (button.dataset.letter === question.targetLetter && button.dataset.case === question.targetCase);
+
+                if (wasAnswerCorrect) {
+                    button.classList.add('correct'); speak("Yay!");
+                    state.race.unicornPos++; updateRacerPositions();
+                    setTimeout(() => {
+                        if (state.race.unicornPos >= state.settings.raceLength) endRound(true);
+                        else generateRaceQuestion();
+                    }, 1200);
+                } else {
+                    button.classList.add('incorrect');
+                    const clickedLetter = button.dataset.letter;
+                    const feedback = `That's the letter ${clickedLetter}. Remember, ${question.prompt}.`;
+                    speak(feedback);
+                    state.race.bearPos++; updateRacerPositions();
+                    setTimeout(() => {
+                        if (state.race.bearPos >= state.race.unicornPos) endRound(false);
+                        else {
+                            button.classList.remove('incorrect');
+                            state.isAnswering = false;
+                        }
+                    }, 2500); // Longer delay for longer feedback
+                }
+            }
+
+            function endRound(didWin) {
+                if (didWin) {
+                    endRoundIcon.textContent = '🎉'; endRoundTitle.textContent = 'You Won!';
+                    endRoundMessage.textContent = 'The unicorn reached the castle! You earned a new sticker!';
+                    addReward();
+                    triggerConfetti(); speak("Hooray! You won!");
+                } else {
+                    endRoundIcon.textContent = '😢'; endRoundTitle.textContent = 'Oh no!';
+                    endRoundMessage.textContent = 'The bear caught the unicorn. Let\'s try again!';
+                    speak("Oh no, the bear caught up. Let's try again!");
+                }
+                showScreen('end-round-screen');
+            }
+
+            // --- Drawing Mode Logic ---
+            function startDrawingMode() {
+                resizeCanvas();
+                clearCanvas();
+                pickNewDrawingLetter();
+            }
+
+            function pickNewDrawingLetter() {
+                if (state.settings.activeLetters.length > 0) {
+                    state.drawing.letter = state.settings.activeLetters[Math.floor(Math.random() * state.settings.activeLetters.length)];
+                } else {
+                    state.drawing.letter = ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+                }
+                const prompt = `Let's draw the letter ${state.drawing.letter}`;
+                drawingInstruction.textContent = prompt;
+                speak(prompt);
+            }
+
+            function resizeCanvas() {
+                const canvas = drawingCanvas;
+                const { width, height } = canvas.getBoundingClientRect();
+                canvas.width = width;
+                canvas.height = height;
+                drawingCtx.strokeStyle = "#0f172a"; // slate-900
+                drawingCtx.lineWidth = 15;
+                drawingCtx.lineCap = "round";
+                drawingCtx.lineJoin = "round";
+            }
+
+            function clearCanvas() {
+                drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            }
+
+            function startDraw(e) {
+                e.preventDefault(); isDrawing = true;
+                const pos = getMousePos(drawingCanvas, e);
+                drawingCtx.beginPath(); drawingCtx.moveTo(pos.x, pos.y);
+            }
+
+            function draw(e) {
+                e.preventDefault(); if (!isDrawing) return;
+                const pos = getMousePos(drawingCanvas, e);
+                drawingCtx.lineTo(pos.x, pos.y); drawingCtx.stroke();
+            }
+
+            function stopDraw() {
+                isDrawing = false; drawingCtx.closePath();
+            }
+
+            function getMousePos(canvas, evt) {
+                const rect = canvas.getBoundingClientRect();
+                const touch = evt.touches ? evt.touches[0] : evt;
+                return {
+                    x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+                    y: (touch.clientY - rect.top) * (canvas.height / rect.height)
+                };
+            }
+
+            function shuffleArray(array) {
+                for (let i = array.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [array[i], array[j]] = [array[j], array[i]];
+                }
+                return array;
+            }
+
+            // --- Event Listeners ---
+            screenBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    if (state.currentScreen === 'settings-screen') handleSettingsChange();
+                    showScreen(btn.dataset.screen);
+                });
+            });
+            homeBtns.forEach(btn => btn.addEventListener('click', () => showScreen('home-screen')));
+            playAgainBtn.addEventListener('click', () => showScreen('game-screen'));
+            replayPromptBtn.addEventListener('click', () => { if (state.race.question) speak(state.race.question.prompt); });
+            letterGrid.addEventListener('click', handleTileClick);
+            letterSelectionGrid.addEventListener('change', handleSettingsChange);
+            caseModeSelection.addEventListener('change', handleSettingsChange);
+            roundLengthSlider.addEventListener('input', () => { roundLengthValue.textContent = roundLengthSlider.value; });
+            roundLengthSlider.addEventListener('change', handleSettingsChange);
+            selectAllLettersBtn.addEventListener('click', () => {
+                letterSelectionGrid.querySelectorAll('input').forEach(cb => cb.checked = true);
+                renderSettings(); handleSettingsChange();
+            });
+            selectNoneLettersBtn.addEventListener('click', () => {
+                letterSelectionGrid.querySelectorAll('input').forEach(cb => cb.checked = false);
+                renderSettings(); handleSettingsChange();
+            });
+            
+            // Drawing listeners
+            clearCanvasBtn.addEventListener('click', clearCanvas);
+            newLetterBtn.addEventListener('click', () => {
+                clearCanvas(); pickNewDrawingLetter();
+            });
+            replayDrawPromptBtn.addEventListener('click', () => speak(`Let's draw the letter ${state.drawing.letter}`));
+            drawingCanvas.addEventListener('mousedown', startDraw);
+            drawingCanvas.addEventListener('mousemove', draw);
+            drawingCanvas.addEventListener('mouseup', stopDraw);
+            drawingCanvas.addEventListener('mouseleave', stopDraw);
+            drawingCanvas.addEventListener('touchstart', startDraw);
+            drawingCanvas.addEventListener('touchmove', draw);
+            drawingCanvas.addEventListener('touchend', stopDraw);
+
+            window.addEventListener('resize', () => {
+                updateRacerPositions();
+                if(state.currentScreen === 'drawing-screen') resizeCanvas();
+            });
+
+            // --- Initialization ---
+            function init() {
+                loadSettings();
+                loadRewards();
+                loadVoices();
+                showScreen('home-screen');
+            }
+            init();
+        });
+    </script>
+</body>
+</html>
